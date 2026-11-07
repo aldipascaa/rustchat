@@ -1,0 +1,3 @@
+# The CSP in routes.rs pins a hash of the inline script in index.html, so line endings must not change.
+static/* text eol=lf
+*.rs text eol=lf
