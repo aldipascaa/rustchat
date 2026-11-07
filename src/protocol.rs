@@ -1,5 +1,6 @@
 //! Wire protocol (JSON over WebSocket) and input validation.
 
+use crate::error::ChatError;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_USERNAME_LEN: usize = 24;
@@ -46,40 +47,53 @@ pub enum ServerMsg {
     System { room: String, text: String, ts: i64 },
     Presence { room: String, users: Vec<String> },
     Typing { room: String, user: String, typing: bool },
-    Error { message: String },
+    /// `code` is a stable machine-readable identifier (see `ChatError::code`).
+    Error {
+        message: String,
+        #[serde(default)]
+        code: String,
+    },
+    /// This connection fell behind on `room`; `skipped` messages were dropped for it.
+    /// Re-send `join` for the room to receive a fresh snapshot.
+    Lagged { room: String, skipped: u64 },
 }
 
-pub fn validate_username(raw: &str) -> Result<String, String> {
+/// Rooms are matched case-insensitively; used where strict validation is unnecessary.
+pub fn normalize_room(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+pub fn validate_username(raw: &str) -> Result<String, ChatError> {
     let name = raw.trim();
     if name.is_empty() || name.chars().count() > MAX_USERNAME_LEN {
-        return Err(format!("username must be 1-{MAX_USERNAME_LEN} characters"));
+        return Err(ChatError::Invalid(format!("username must be 1-{MAX_USERNAME_LEN} characters")));
     }
     if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
-        return Err("username may only contain letters, digits, '_', '-' and '.'".into());
+        return Err(ChatError::Invalid("username may only contain letters, digits, '_', '-' and '.'".into()));
     }
     Ok(name.to_string())
 }
 
 /// Normalise a room name to lowercase `[a-z0-9_-]{1,32}`.
-pub fn validate_room(raw: &str) -> Result<String, String> {
+pub fn validate_room(raw: &str) -> Result<String, ChatError> {
     let name = raw.trim().to_lowercase();
     if name.is_empty() || name.len() > MAX_ROOM_LEN {
-        return Err(format!("room name must be 1-{MAX_ROOM_LEN} characters"));
+        return Err(ChatError::Invalid(format!("room name must be 1-{MAX_ROOM_LEN} characters")));
     }
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return Err("room name may only contain a-z, 0-9, '_' and '-'".into());
+        return Err(ChatError::Invalid("room name may only contain a-z, 0-9, '_' and '-'".into()));
     }
     Ok(name)
 }
 
 /// Trim and validate message text against the configured maximum length.
-pub fn validate_text(raw: &str, max: usize) -> Result<String, String> {
+pub fn validate_text(raw: &str, max: usize) -> Result<String, ChatError> {
     let t = raw.trim();
     if t.is_empty() {
-        return Err("message is empty".into());
+        return Err(ChatError::Invalid("message is empty".into()));
     }
     if t.chars().count() > max {
-        return Err(format!("message too long (max {max} characters)"));
+        return Err(ChatError::Invalid(format!("message too long (max {max} characters)")));
     }
     Ok(t.to_string())
 }
