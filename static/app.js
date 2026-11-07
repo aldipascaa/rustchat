@@ -35,6 +35,8 @@
     typingStop: null,
     stick: true,
     closing: false,
+    everOnline: false,    // received a welcome at least once this session
+    rejected: null,       // username_taken / username_reserved error from the server
   };
 
   /* ---------- helpers ---------- */
@@ -130,6 +132,9 @@
   function start(name) {
     state.username = name;
     state.closing = false;
+    state.everOnline = false;
+    state.rejected = null;
+    state.retry = 0;
     el.login.hidden = true;
     el.app.hidden = false;
     el.meName.textContent = name;
@@ -154,8 +159,19 @@
       try { m = JSON.parse(ev.data); } catch (e) { return; }
       handle(m);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (state.ws !== ws || state.closing) return;
+      const rej = state.rejected;
+      state.rejected = null;
+      if (ev.code === 4009 && rej && !state.everOnline) {
+        // The name is taken or reserved: back to the login form instead of retrying forever.
+        // (After a network blip the old session can linger briefly, so once we have been
+        // online we keep retrying with backoff instead.)
+        state.closing = true;
+        store.del('username');
+        showLogin(rej.message);
+        return;
+      }
       state.joined = null;
       setComposerEnabled(false);
       clearTypers();
@@ -174,6 +190,7 @@
   function handle(m) {
     switch (m.type) {
       case 'welcome':
+        state.everOnline = true;
         state.rooms = m.rooms;
         renderRooms();
         if (state.current) joinRoom(state.current, true);
@@ -217,7 +234,12 @@
         if (m.typing) addTyper(m.user); else removeTyper(m.user);
         break;
       case 'error':
+        if (m.code === 'username_taken' || m.code === 'username_reserved') { state.rejected = m; if (state.everOnline) toast(m.message, 'error'); break; }
         toast(m.message, 'error');
+        break;
+      case 'lagged':
+        // This connection fell behind and missed messages: ask for a fresh snapshot.
+        if (m.room === state.joined) { toast('Connection was slow, resyncing…'); send({ type: 'join', room: m.room }); }
         break;
     }
   }
