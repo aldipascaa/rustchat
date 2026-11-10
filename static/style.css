@@ -203,3 +203,19 @@ input:disabled { opacity: .6; }
   .toasts { left: 16px; right: 16px; bottom: 80px; }
 }
 @media (prefers-reduced-motion: reduce) { .sidebar, .people { transition: none; } }
+
+.load-earlier {
+  align-self: center;
+  margin: 4px auto 12px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.load-earlier:hover:not(:disabled) { background: var(--surface-2); }
+.load-earlier:disabled { color: var(--muted); cursor: default; }

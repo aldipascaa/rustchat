@@ -41,7 +41,14 @@ pub enum ClientMsg {
 pub enum ServerMsg {
     Welcome { username: String, rooms: Vec<RoomInfo> },
     Rooms { rooms: Vec<RoomInfo> },
-    Joined { room: String, history: Vec<ChatMessage>, users: Vec<String> },
+    /// `has_more`: older messages exist; page through `GET /api/rooms/:room/messages?before=<oldest id>`.
+    Joined {
+        room: String,
+        history: Vec<ChatMessage>,
+        users: Vec<String>,
+        #[serde(default)]
+        has_more: bool,
+    },
     Left { room: String },
     Message(ChatMessage),
     System { room: String, text: String, ts: i64 },

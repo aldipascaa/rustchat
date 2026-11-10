@@ -9,7 +9,7 @@ Built with [axum](https://github.com/tokio-rs/axum) + [tokio](https://tokio.rs),
 - Multiple chat rooms: create, join and leave at runtime
 - WebSocket messaging with per-room `tokio::sync::broadcast` channels
 - Online presence list per room, typing indicators, join/leave system messages
-- Message history persisted in SQLite; the last 50 messages are replayed on join
+- Message history persisted in SQLite; the last 50 messages are replayed on join and older ones load on demand ("Load earlier messages")
 - REST API: health check, room list (with online counts), room history
 - Unique, case-insensitive usernames with a reserved list; WebSocket Origin check; connection, room and frame-size limits
 - Per-connection token-bucket rate limiting and message length / name validation
@@ -113,9 +113,9 @@ cargo clippy --all-targets
 
 | Method & path | Description |
 | --- | --- |
-| `GET /api/health` | `{"status":"ok","version":"1.1.0","connections":0}`; `503` with `"status":"degraded"` if the database is unreachable |
+| `GET /api/health` | `{"status":"ok","version":"1.2.0","connections":0}`; `503` with `"status":"degraded"` if the database is unreachable |
 | `GET /api/rooms` | `{"rooms":[{"name":"general","users":2}, ...]}` |
-| `GET /api/rooms/:room/messages?limit=50` | `{"room":"general","messages":[...]}` oldest first, `limit` 1-200; 404 for unknown rooms |
+| `GET /api/rooms/:room/messages?limit=50&before=<id>` | `{"room":"general","messages":[...],"has_more":true}` oldest first, `limit` 1-200; `before` returns the page older than that message id; 404 for unknown rooms |
 
 ## WebSocket protocol
 
@@ -137,7 +137,7 @@ Connect to `ws://HOST:PORT/ws?username=NAME` (1-24 chars of letters, digits, `_`
 ```json
 {"type":"welcome","username":"alice","rooms":[{"name":"general","users":0}]}
 {"type":"rooms","rooms":[{"name":"general","users":1}]}
-{"type":"joined","room":"general","users":["alice"],"history":[{"id":1,"room":"general","user":"bob","text":"hi","ts":1700000000000}]}
+{"type":"joined","room":"general","users":["alice"],"has_more":false,"history":[{"id":1,"room":"general","user":"bob","text":"hi","ts":1700000000000}]}
 {"type":"left","room":"general"}
 {"type":"message","id":2,"room":"general","user":"alice","text":"hello","ts":1700000001000}
 {"type":"system","room":"general","text":"alice joined the room","ts":1700000001000}

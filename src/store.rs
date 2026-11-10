@@ -44,7 +44,8 @@ pub trait Store: Send + Sync + 'static {
     /// Persist a message. `Ok(None)` means the room no longer exists.
     fn insert_message(&self, room: &str, user: &str, text: &str) -> Result<Option<ChatMessage>, StoreError>;
     /// The most recent `limit` messages of a room, oldest first.
-    fn recent_messages(&self, room: &str, limit: usize) -> Result<Vec<ChatMessage>, StoreError>;
+    /// With `before`, only messages with a smaller id (the page older than that message).
+    fn recent_messages(&self, room: &str, before: Option<i64>, limit: usize) -> Result<Vec<ChatMessage>, StoreError>;
     fn prune(&self, policy: &PrunePolicy) -> Result<PruneReport, StoreError>;
     /// Cheap liveness probe used by the health endpoint.
     fn ping(&self) -> Result<(), StoreError>;
@@ -89,9 +90,9 @@ impl Repo {
         self.run(move |s| s.insert_message(&room, &user, &text)).await
     }
 
-    pub async fn recent_messages(&self, room: &str, limit: usize) -> Result<Vec<ChatMessage>, StoreError> {
+    pub async fn recent_messages(&self, room: &str, before: Option<i64>, limit: usize) -> Result<Vec<ChatMessage>, StoreError> {
         let room = room.to_string();
-        self.run(move |s| s.recent_messages(&room, limit)).await
+        self.run(move |s| s.recent_messages(&room, before, limit)).await
     }
 
     pub async fn prune(&self, policy: PrunePolicy) -> Result<PruneReport, StoreError> {

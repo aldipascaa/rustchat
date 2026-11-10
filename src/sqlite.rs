@@ -91,10 +91,10 @@ impl Store for SqliteStore {
         Ok(Some(ChatMessage { id: c.last_insert_rowid(), room: room.into(), user: user.into(), text: text.into(), ts }))
     }
 
-    fn recent_messages(&self, room: &str, limit: usize) -> Result<Vec<ChatMessage>, StoreError> {
+    fn recent_messages(&self, room: &str, before: Option<i64>, limit: usize) -> Result<Vec<ChatMessage>, StoreError> {
         let c = self.lock()?;
-        let mut st = c.prepare("SELECT id, room, user, text, ts FROM messages WHERE room=?1 ORDER BY id DESC LIMIT ?2")?;
-        let rows = st.query_map(params![room, limit as i64], |r| {
+        let mut st = c.prepare("SELECT id, room, user, text, ts FROM messages WHERE room=?1 AND id < ?2 ORDER BY id DESC LIMIT ?3")?;
+        let rows = st.query_map(params![room, before.unwrap_or(i64::MAX), limit as i64], |r| {
             Ok(ChatMessage { id: r.get(0)?, room: r.get(1)?, user: r.get(2)?, text: r.get(3)?, ts: r.get(4)? })
         })?;
         let mut v: Vec<ChatMessage> = rows.collect::<rusqlite::Result<_>>()?;
@@ -182,7 +182,7 @@ mod tests {
             db.insert_message("general", "bob", &format!("m{i}")).await.unwrap().unwrap();
         }
         db.insert_message("random", "bob", "other").await.unwrap().unwrap();
-        let h = db.recent_messages("general", 50).await.unwrap();
+        let h = db.recent_messages("general", None, 50).await.unwrap();
         assert_eq!(h.len(), 50);
         assert_eq!(h.first().unwrap().text, "m10");
         assert_eq!(h.last().unwrap().text, "m59");
@@ -205,9 +205,9 @@ mod tests {
         }
         let rep = db.prune(PrunePolicy { max_per_room: Some(3), ..Default::default() }).await.unwrap();
         assert_eq!(rep, PruneReport { messages_deleted: 7, rooms_deleted: 0 });
-        let g = db.recent_messages("general", 50).await.unwrap();
+        let g = db.recent_messages("general", None, 50).await.unwrap();
         assert_eq!(g.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["g7", "g8", "g9"]);
-        assert_eq!(db.recent_messages("random", 50).await.unwrap().len(), 2);
+        assert_eq!(db.recent_messages("random", None, 50).await.unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(none.messages_deleted, 0);
         let all = db.prune(PrunePolicy { messages_before_ms: Some(now_ms() + 60_000), ..Default::default() }).await.unwrap();
         assert_eq!(all.messages_deleted, 1);
-        assert!(db.recent_messages("general", 50).await.unwrap().is_empty());
+        assert!(db.recent_messages("general", None, 50).await.unwrap().is_empty());
     }
 
     #[tokio::test]

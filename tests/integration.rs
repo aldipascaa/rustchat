@@ -459,3 +459,40 @@ async fn invalid_config_is_rejected_by_app_state() {
     let bad = Config { rate_refill_per_sec: 0.0, ..Config::default() };
     assert!(AppState::new(bad).is_err());
 }
+
+#[tokio::test]
+async fn history_pages_backwards_with_a_before_cursor() {
+    let (addr, state) = start(Config { history_limit: 3, ..Config::default() }).await;
+    for i in 1..=7 {
+        state.chat.repo().insert_message("general", "alice", &format!("m{i}")).await.unwrap().unwrap();
+    }
+    let texts = |v: &Value| v.as_array().unwrap().iter().map(|m| m["text"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    // Joining gives the newest page and says that older messages exist.
+    let mut bob = connect(&addr, "bob").await;
+    recv_type(&mut bob, "welcome").await;
+    send(&mut bob, json!({"type":"join","room":"general"})).await;
+    let joined = recv_type(&mut bob, "joined").await;
+    assert_eq!(texts(&joined["history"]), ["m5", "m6", "m7"]);
+    assert_eq!(joined["has_more"], true);
+
+    // Page back using the oldest id on screen as the cursor.
+    let oldest = joined["history"][0]["id"].as_i64().unwrap();
+    let (status, body) = http_get(&addr, &format!("/api/rooms/general/messages?before={oldest}&limit=3")).await;
+    assert_eq!(status, 200);
+    let page: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(texts(&page["messages"]), ["m2", "m3", "m4"]);
+    assert_eq!(page["has_more"], true);
+
+    let oldest = page["messages"][0]["id"].as_i64().unwrap();
+    let (_, body) = http_get(&addr, &format!("/api/rooms/general/messages?before={oldest}&limit=3")).await;
+    let page: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(texts(&page["messages"]), ["m1"]);
+    assert_eq!(page["has_more"], false);
+
+    // A room that fits in one page has nothing older.
+    let (_, body) = http_get(&addr, "/api/rooms/random/messages").await;
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["has_more"], false);
+    let (status, _) = http_get(&addr, "/api/rooms/general/messages?before=abc").await;
+    assert_eq!(status, 400);
+}

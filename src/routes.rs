@@ -129,11 +129,13 @@ async fn list_rooms(State(st): State<AppState>) -> Result<Json<serde_json::Value
 #[derive(Deserialize)]
 struct HistoryQuery {
     limit: Option<usize>,
+    /// Only messages older than this message id (cursor for paging backwards).
+    before: Option<i64>,
 }
 
 async fn room_messages(State(st): State<AppState>, Path(room): Path<String>, Query(q): Query<HistoryQuery>) -> Result<Json<serde_json::Value>, ChatError> {
-    let (room, messages) = st.chat.history(&room, q.limit).await?;
-    Ok(Json(json!({ "room": room, "messages": messages })))
+    let (room, messages, has_more) = st.chat.history(&room, q.limit, q.before).await?;
+    Ok(Json(json!({ "room": room, "messages": messages, "has_more": has_more })))
 }
 
 #[cfg(test)]

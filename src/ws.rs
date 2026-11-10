@@ -308,7 +308,7 @@ impl Session {
         let chat = self.state.chat.clone();
         let j = chat.join(self.id, &self.username, raw, self.joined.len()).await?;
         // Queue `Joined` before the forwarder starts so it always arrives first.
-        self.send(ServerMsg::Joined { room: j.room.clone(), history: j.history, users: j.users.clone() }).await;
+        self.send(ServerMsg::Joined { room: j.room.clone(), history: j.history, users: j.users.clone(), has_more: j.has_more }).await;
         if let Some(rx) = j.rx {
             self.joined.insert(j.room.clone(), spawn_forwarder(rx, self.out.clone(), Some(j.room.clone())));
             tracing::info!(room = %j.room, "joined");

@@ -19,6 +19,8 @@ const DAY_MS: i64 = 86_400_000;
 pub struct JoinOutcome {
     pub room: String,
     pub history: Vec<ChatMessage>,
+    /// Older messages than `history` exist (fetch them over REST with `before`).
+    pub has_more: bool,
     pub users: Vec<String>,
     /// `Some` when the connection was newly added (`None` for a repeated join = snapshot refresh).
     pub rx: Option<broadcast::Receiver<ServerMsg>>,
@@ -97,13 +99,13 @@ impl ChatService {
         };
         // Subscribe first, then read history: a message racing the join shows up in both
         // (clients de-duplicate by id) rather than being lost.
-        match self.repo.recent_messages(&room, self.config.history_limit).await {
-            Ok(history) => Ok(JoinOutcome { room, history, users, rx }),
+        match self.page(&room, None, self.config.history_limit).await {
+            Ok((history, has_more)) => Ok(JoinOutcome { room, history, has_more, users, rx }),
             Err(e) => {
                 if rx.is_some() {
                     self.hub.leave(&room, conn);
                 }
-                Err(e.into())
+                Err(e)
             }
         }
     }
@@ -147,16 +149,28 @@ impl ChatService {
         }
     }
 
-    /// History for the REST API. Unknown or malformed room names are `RoomNotFound`.
-    pub async fn history(&self, raw_room: &str, limit: Option<usize>) -> Result<(String, Vec<ChatMessage>), ChatError> {
+    /// One page of history, oldest first, plus whether older messages exist. Fetches one row
+    /// more than asked for, so "has more" needs no second query.
+    async fn page(&self, room: &str, before: Option<i64>, limit: usize) -> Result<(Vec<ChatMessage>, bool), ChatError> {
+        let mut messages = self.repo.recent_messages(room, before, limit + 1).await?;
+        let has_more = messages.len() > limit;
+        if has_more {
+            messages.remove(0);
+        }
+        Ok((messages, has_more))
+    }
+
+    /// History for the REST API: the newest `limit` messages, or with `before` the page older
+    /// than that message id. Unknown or malformed room names are `RoomNotFound`.
+    pub async fn history(&self, raw_room: &str, limit: Option<usize>, before: Option<i64>) -> Result<(String, Vec<ChatMessage>, bool), ChatError> {
         let not_found = || ChatError::RoomNotFound(raw_room.trim().to_string());
         let room = validate_room(raw_room).map_err(|_| not_found())?;
         if !self.repo.room_exists(&room).await? {
             return Err(not_found());
         }
         let limit = limit.unwrap_or(self.config.history_limit).clamp(1, 200);
-        let messages = self.repo.recent_messages(&room, limit).await?;
-        Ok((room, messages))
+        let (messages, has_more) = self.page(&room, before, limit).await?;
+        Ok((room, messages, has_more))
     }
 
     /// The retention policy derived from configuration, evaluated at `now`.
@@ -202,7 +216,7 @@ mod tests {
         fn room_exists(&self, _: &str) -> Result<bool, StoreError> { boom() }
         fn create_room(&self, _: &str, _: usize) -> Result<CreateOutcome, StoreError> { boom() }
         fn insert_message(&self, _: &str, _: &str, _: &str) -> Result<Option<ChatMessage>, StoreError> { boom() }
-        fn recent_messages(&self, _: &str, _: usize) -> Result<Vec<ChatMessage>, StoreError> { boom() }
+        fn recent_messages(&self, _: &str, _: Option<i64>, _: usize) -> Result<Vec<ChatMessage>, StoreError> { boom() }
         fn prune(&self, _: &PrunePolicy) -> Result<PruneReport, StoreError> { boom() }
         fn ping(&self) -> Result<(), StoreError> { boom() }
     }
@@ -213,7 +227,7 @@ mod tests {
         assert!(matches!(svc.room_list().await, Err(ChatError::Store(_))));
         assert!(matches!(svc.create_room("x").await, Err(ChatError::Store(_))));
         assert!(matches!(svc.join(1, "a", "general", 0).await, Err(ChatError::Store(_))));
-        assert!(matches!(svc.history("general", None).await, Err(ChatError::Store(_))));
+        assert!(matches!(svc.history("general", None, None).await, Err(ChatError::Store(_))));
         assert!(matches!(svc.prune_once().await, Err(ChatError::Store(_))));
         assert_eq!(ChatError::Store(StoreError::Poisoned).to_string(), "internal error");
     }
@@ -252,7 +266,7 @@ mod tests {
         }
         let rep = svc.prune_once().await.unwrap();
         assert_eq!(rep.messages_deleted, 10);
-        assert_eq!(svc.repo().recent_messages("general", 200).await.unwrap().len(), 50);
+        assert_eq!(svc.repo().recent_messages("general", None, 200).await.unwrap().len(), 50);
         // occupied rooms are in the protected list handed to the store
         let _j = svc.join(1, "a", "random", 0).await.unwrap();
         assert!(svc.prune_policy(now_ms()).protected_rooms.contains(&"random".to_string()));

@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-10
+
+### Added
+- **Older history on demand.** `GET /api/rooms/:room/messages` takes a `before=<message id>` cursor and returns
+  `has_more`; the `joined` frame carries `has_more` too. The web client shows a "Load earlier messages" button
+  and keeps the scroll position while older pages are prepended. Before this, only the newest 50 messages of a
+  room were reachable even though up to 10,000 are kept.
+- GitHub Actions workflow: build, clippy with `-D warnings` and tests on every push and pull request.
+
+### Changed
+- `Store::recent_messages` takes an optional `before` id (library API).
+
+### Removed
+- `src/db.rs`, a leftover of the 1.0 storage module that was no longer compiled.
+
 ## [1.1.0] - 2026-11-08
 
 Architecture review release. See [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) for the findings and decisions.

@@ -37,6 +37,8 @@
     closing: false,
     everOnline: false,    // received a welcome at least once this session
     rejected: null,       // username_taken / username_reserved error from the server
+    hasMore: false,       // older messages exist on the server
+    loadingEarlier: false,
   };
 
   /* ---------- helpers ---------- */
@@ -205,6 +207,8 @@
         state.messages = [];
         state.seen = new Set();
         state.users = m.users;
+        state.hasMore = !!m.has_more;
+        state.loadingEarlier = false;
         for (const h of m.history) addMessage({ kind: 'msg', ...h }, true);
         renderMessages();
         renderPeople();
@@ -349,11 +353,43 @@
     frag.appendChild(row);
     return frag;
   }
-  function renderMessages() {
+  function renderMessages(keepPosition) {
+    const before = el.messages.scrollHeight - el.messages.scrollTop;
     el.messages.replaceChildren();
+    if (state.hasMore) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'load-earlier'; b.textContent = state.loadingEarlier ? 'Loading…' : 'Load earlier messages';
+      b.disabled = state.loadingEarlier;
+      b.addEventListener('click', loadEarlier);
+      el.messages.appendChild(b);
+    }
     for (let i = 0; i < state.messages.length; i++) el.messages.appendChild(buildNode(i));
+    if (keepPosition) { el.messages.scrollTop = el.messages.scrollHeight - before; return; }
     state.stick = true;
     scrollToBottom();
+  }
+  // Page backwards through history over REST, using the oldest message on screen as the cursor.
+  async function loadEarlier() {
+    const room = state.joined;
+    const oldest = state.messages.find((m) => m.kind === 'msg');
+    if (!room || !oldest || state.loadingEarlier) return;
+    state.loadingEarlier = true;
+    renderMessages(true);
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/messages?before=${oldest.id}&limit=50`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const page = await res.json();
+      if (room !== state.joined) return; // switched rooms while loading
+      const older = page.messages.filter((m) => !state.seen.has(m.id)).map((m) => ({ kind: 'msg', ...m }));
+      for (const m of older) state.seen.add(m.id);
+      state.messages = older.concat(state.messages);
+      state.hasMore = !!page.has_more;
+    } catch (e) {
+      toast('Could not load earlier messages', 'error');
+    } finally {
+      state.loadingEarlier = false;
+      if (room === state.joined) renderMessages(true);
+    }
   }
   function appendOne(i) {
     const own = state.messages[i].user === state.username;
